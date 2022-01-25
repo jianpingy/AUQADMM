@@ -219,7 +219,7 @@ def Generate_and_Classify_Trainsets(Number_of_Samples_each_worker, Target_Datase
     else:
         Zeros = []; Ones = []
 
-        for data in trainLoader_min:
+        for data in TrainLoader:
             D, L = data
             if L[0] == 0:
                 Zeros.append(D)
@@ -250,18 +250,16 @@ def Generate_and_Classify_Trainsets(Number_of_Samples_each_worker, Target_Datase
 
 #Lanczos Algorithm
 def manual_Lanczos(f, x, q1, rank):
-    '''
-    Lanczos
-    #INPUTS:
-    f: objective function
-    x: the point at which the gradient and Hessian are evaluated
-    q1: initial vector
-    rank: desired rank number for the approximation QTQ^t
+    ##INPUTS:
+    #f: objective function
+    #x: the point at which the gradient and Hessian are evaluated
+    #q1: initial vector
+    #rank: desired rank number for the approximation QTQ^t
     
-    #OUTPUTS:
-    Qt: transpose of Q
-    T: the triadiagonal matrix T
-    '''
+    ##OUTPUTS:
+    #Qt: transpose of Q
+    #T: the triadiagonal matrix T
+    
     k = 0
     beta = 1.0
     q = torch.zeros_like(q1)
@@ -300,42 +298,51 @@ def manual_Lanczos(f, x, q1, rank):
     
     return [torch.tensor(Qt).clone().detach(), T.clone().detach()]
 
-def FullLoss(loss_function, trainset, x, N, M):
-    '''
-    Calculates the loss from the features (trainset) and the input (x)
-    with the loss function (loss_function). 
-    N = number of samples per worker. 
-    M = dimension of training data
-    '''
-    return loss_function(trainset, x, N, M)
 
-def Multinomial(trainset, x, N, M):
-    loss = nn.CrossEntropyLoss()
-    output = 0
-    X, y = trainset
-    X = X.view(-1, M)
-    input = torch.mm(X, x)
-    output += loss(input,y)/(N*1.0)
-    return output
+### Loss Function ###
+#If one needs loss functions other than 'Multinomial',
+#'Elastic_Net' and 'Smoothed_SVM', please directly input 
+#the name of the loss function to LOSS_NAME, e.g. nn.MSELoss().
+def FullLoss(trainset, x, N, M, LOSS_NAME):
+    if LOSS_NAME == 'Multinomial':
+        loss = nn.CrossEntropyLoss()
+        output = 0
+        X, y = trainset
+        X = X.view(-1, M)
+        input = torch.mm(X, x)
+        output += loss(input,y)/(N*1.0)
+        return output
+    elif LOSS_NAME == 'Elastic_Net':
+        loss = nn.MSELoss()
+        output = 0
+        X, y = trainset
+        X = X.view(-1, M)
+        input = torch.mm(X, x)
+        y = y.reshape(X.shape[0],1)
+        y = y.type(torch.FloatTensor)
+        output += loss(input,y)
+        return output
+    elif LOSS_NAME == 'Smoothed_SVM':
+        def j(u, eps):
+            return 0.5*(u+torch.sqrt(eps**2+u**2))
 
-def ElasticNet(trainset, x, N, M): 
-    loss = nn.MSELoss()
-    output = 0
-    X, y = trainset
-    X = X.view(-1, M)
-    input = torch.mm(X, x)
-    y = y.reshape(X.shape[0],1)
-    y = y.type(torch.FloatTensor)
-    output += loss(input,y)
-    return output
+        def hinge_loss(X, u, y, eps):
+            return torch.mean(j(1-y*torch.mm(X,u),eps))
 
-def SmoothedSVM(trainset, x, N, M): 
-    def j(u, eps):
-        return 0.5*(u+torch.sqrt(eps**2+u**2))
-
-    def hinge_loss(X, u, y, eps):
-        return torch.mean(j(1-y*torch.mm(X,u),eps))
-
-    X, y = trainset
-    eps = 1.0/5000.0
-    return hinge_loss(X, x, y, eps)
+        X, y = trainset
+        eps = 1.0/5000.0
+        return hinge_loss(X, x, y, eps)
+    else:
+        '''
+        Calculates the loss from the features (trainset) and the input (x)
+        with the loss function (function)
+        '''
+        loss = LOSS_NAME
+        output = 0
+        X, y = trainset
+        X = X.view(-1, M)
+        input = torch.mm(X, x)
+        y = y.unsqueeze(1)
+        y = y.type(torch.FloatTensor)
+        output += loss(input,y)
+        return output
